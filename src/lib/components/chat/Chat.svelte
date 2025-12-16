@@ -42,7 +42,10 @@
 		functions,
 		selectedFolder,
 		pinnedChats,
-		showEmbeds
+		showEmbeds,
+		puterEnabled,
+		puterSignedIn,
+		puterUser
 	} from '$lib/stores';
 
 	import {
@@ -83,6 +86,7 @@
 	import { createOpenAITextStream } from '$lib/apis/streaming';
 	import { getFunctions } from '$lib/apis/functions';
 	import { updateFolderById } from '$lib/apis/folders';
+	import * as PuterAPI from '$lib/apis/puter';
 
 	import Banner from '../common/Banner.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
@@ -1816,7 +1820,175 @@
 		return features;
 	};
 
+	// Handle Puter chat - runs entirely in browser, no backend needed
+	const sendMessagePuter = async (model, _messages, _history, responseMessageId, _chatId) => {
+		const responseMessage = _history.messages[responseMessageId];
+		const userMessage = _history.messages[responseMessage.parentId];
+
+		// Check Puter auth
+		if (!PuterAPI.isSignedIn()) {
+			try {
+				const signedIn = await PuterAPI.signIn();
+				if (!signedIn) {
+					responseMessage.error = { content: 'Please sign in with Puter to use this model.' };
+					responseMessage.done = true;
+					history.messages[responseMessageId] = responseMessage;
+					return;
+				}
+				puterSignedIn.set(true);
+				const user = await PuterAPI.getUser();
+				if (user) {
+					puterUser.set({ username: user.username, email: user.email });
+				}
+			} catch (err) {
+				responseMessage.error = { content: `Puter authentication failed: ${err.message}` };
+				responseMessage.done = true;
+				history.messages[responseMessageId] = responseMessage;
+				return;
+			}
+		}
+
+		// Convert messages to Puter format
+		console.log('[Puter] Raw messages:', JSON.stringify(_messages.map(m => ({ role: m.role, content: m.content })), null, 2));
+		const puterMessages = _messages
+			.map((msg) => {
+				// Extract text content from various message formats
+				let textContent = '';
+				if (typeof msg.content === 'string') {
+					textContent = msg.content;
+				} else if (Array.isArray(msg.content)) {
+					// Handle array format: [{type: 'text', text: '...'}, {type: 'image_url', ...}]
+					const textPart = msg.content.find((part) => part.type === 'text');
+					textContent = textPart?.text || '';
+				} else if (msg.content && typeof msg.content === 'object') {
+					// Handle object format if any
+					textContent = msg.content.text || msg.content.content || '';
+				}
+				return {
+					role: msg.role as 'user' | 'assistant' | 'system',
+					content: textContent
+				};
+			})
+			// Filter out empty content and placeholder messages like [RESPONSE] or [PROMPT]
+			.filter((msg) => {
+				if (!msg.content || msg.content.trim() === '') return false;
+				// Filter out placeholder content (starts with [ and contains a UUID pattern)
+				if (msg.content.startsWith('[RESPONSE]') || msg.content.startsWith('[PROMPT]')) return false;
+				return true;
+			});
+		
+		console.log('[Puter] Converted messages:', JSON.stringify(puterMessages, null, 2));
+
+		// Ensure we have at least one message with content
+		if (puterMessages.length === 0) {
+			responseMessage.error = { content: 'No valid message content to send.' };
+			responseMessage.done = true;
+			history.messages[responseMessageId] = responseMessage;
+			return;
+		}
+
+		// Add system prompt if present
+		if (params?.system || $settings?.system) {
+			puterMessages.unshift({
+				role: 'system' as const,
+				content: params?.system ?? $settings?.system ?? ''
+			});
+		}
+
+		scrollToBottom();
+		eventTarget.dispatchEvent(
+			new CustomEvent('chat:start', {
+				detail: {
+					id: responseMessageId
+				}
+			})
+		);
+		await tick();
+
+		// Extract the actual model ID (remove 'puter/' prefix if present)
+		const puterModelId = model.id.startsWith('puter/') ? model.id.slice(6) : model.id;
+		console.log('[Puter] Model ID:', model.id, '-> Puter Model ID:', puterModelId);
+
+		try {
+			await PuterAPI.chat(
+				puterMessages,
+				{
+					model: puterModelId,
+					temperature: params?.temperature ?? $settings?.params?.temperature ?? 0.8
+				},
+				{
+					onToken: (token) => {
+						responseMessage.content += token;
+						history.messages[responseMessageId] = responseMessage;
+					},
+					onComplete: async (fullText) => {
+						responseMessage.content = fullText;
+						responseMessage.done = true;
+						history.messages[responseMessageId] = responseMessage;
+
+						eventTarget.dispatchEvent(
+							new CustomEvent('chat:finish', {
+								detail: {
+									id: responseMessageId,
+									content: fullText
+								}
+							})
+						);
+
+						// Generate title for new chats using Puter
+						if (
+							!$temporaryChatEnabled &&
+							_chatId &&
+							_messages.length <= 2 &&
+							($settings?.title?.auto ?? true)
+						) {
+							const userContent =
+								typeof userMessage.content === 'string'
+									? userMessage.content
+									: userMessage.content[0]?.text || '';
+							const title = await PuterAPI.generateTitle(userContent, fullText);
+							if (title && title !== 'New Chat') {
+								chatTitle.set(title);
+								await updateChatById(localStorage.token, _chatId, { title });
+								await chats.set(await getChatList(localStorage.token));
+							}
+						}
+
+						// Save to backend if not temporary chat
+						if (!$temporaryChatEnabled && _chatId) {
+							await updateChatById(localStorage.token, _chatId, {
+								messages: createMessagesList(history, responseMessageId),
+								history: history
+							});
+						}
+					},
+					onError: (error) => {
+						const errorMsg = error?.message || (typeof error === 'string' ? error : JSON.stringify(error));
+						responseMessage.error = { content: errorMsg };
+						responseMessage.done = true;
+						history.messages[responseMessageId] = responseMessage;
+						toast.error(`Puter error: ${errorMsg}`);
+					}
+				}
+			);
+		} catch (error) {
+			const errorMsg = error?.message || (typeof error === 'string' ? error : JSON.stringify(error));
+			responseMessage.error = { content: errorMsg };
+			responseMessage.done = true;
+			history.messages[responseMessageId] = responseMessage;
+			toast.error(`Puter error: ${errorMsg}`);
+		}
+
+		await tick();
+		scrollToBottom();
+	};
+
 	const sendMessageSocket = async (model, _messages, _history, responseMessageId, _chatId) => {
+		// Check if this is a Puter model - handle entirely in browser
+		if (model.id.startsWith('puter/') || model.owned_by === 'puter') {
+			return await sendMessagePuter(model, _messages, _history, responseMessageId, _chatId);
+		}
+
 		const responseMessage = _history.messages[responseMessageId];
 		const userMessage = _history.messages[responseMessage.parentId];
 

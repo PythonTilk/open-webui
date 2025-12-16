@@ -10,6 +10,7 @@
 
 	import AdvancedParams from './Advanced/AdvancedParams.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
+	import PuterConnection from '$lib/components/admin/Settings/Connections/PuterConnection.svelte';
 	export let saveSettings: Function;
 	export let getModels: Function;
 
@@ -274,6 +275,14 @@
 					</button>
 				</div>
 			</div>
+		</div>
+
+		<hr class="border-gray-100/30 dark:border-gray-850/30 my-3" />
+
+		<!-- Puter.js - Free AI Models -->
+		<div>
+			<div class=" mb-1 text-sm font-medium">{$i18n.t('Free AI Models')}</div>
+			<PuterConnection />
 		</div>
 
 		{#if $user?.role === 'admin' || (($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.system_prompt ?? true))}

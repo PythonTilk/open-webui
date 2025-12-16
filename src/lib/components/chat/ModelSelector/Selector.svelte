@@ -21,11 +21,13 @@
 		mobile,
 		temporaryChatEnabled,
 		settings,
-		config
+		config,
+		puterEnabled
 	} from '$lib/stores';
 	import { toast } from 'svelte-sonner';
 	import { capitalizeFirstLetter, sanitizeResponseContent, splitStream } from '$lib/utils';
 	import { getModels } from '$lib/apis';
+	import * as PuterAPI from '$lib/apis/puter';
 
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import Check from '$lib/components/icons/Check.svelte';
@@ -386,12 +388,32 @@
 				? 'dark:placeholder-gray-100 placeholder-gray-800'
 				: 'placeholder-gray-400'}"
 			on:mouseenter={async () => {
-				models.set(
-					await getModels(
-						localStorage.token,
-						$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-					)
+				let allModels = await getModels(
+					localStorage.token,
+					$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
 				);
+				
+				// Add Puter models if enabled
+				if ($puterEnabled && PuterAPI.isPuterAvailable()) {
+					try {
+						const customModels = $settings?.puterCustomModels ?? [];
+						const puterModels = PuterAPI.getModelsWithCustom(customModels);
+						if (Array.isArray(puterModels) && puterModels.length > 0) {
+							const formattedPuterModels = puterModels.map((m) => ({
+								id: `puter/${m.id || m.name || 'unknown'}`,
+								name: `Puter: ${m.name || m.id || 'Unknown Model'}`,
+								owned_by: 'puter',
+								external: true,
+								puter: true
+							}));
+							allModels = [...allModels, ...formattedPuterModels];
+						}
+					} catch (error) {
+						console.error('Failed to load Puter models:', error);
+					}
+				}
+				
+				models.set(allModels);
 			}}
 		>
 			{#if selectedModel}

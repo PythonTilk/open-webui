@@ -202,6 +202,10 @@ type Settings = {
 	chatDirection?: 'LTR' | 'RTL' | 'auto';
 	ctrlEnterToSend?: boolean;
 
+	// Puter.js integration
+	puterEnabled?: boolean;
+	puterCustomModels?: PuterCustomModel[];
+
 	system?: string;
 	seed?: number;
 	temperature?: string;
@@ -216,6 +220,11 @@ type Settings = {
 
 type ModelOptions = {
 	stop?: boolean;
+};
+
+type PuterCustomModel = {
+	id: string;
+	endpoint?: string;
 };
 
 type AudioSettings = {
@@ -299,3 +308,9 @@ export type SessionUser = {
 	role: string;
 	profile_image_url: string;
 };
+
+// Puter.js integration stores
+export const puterEnabled = writable(false);
+export const puterSignedIn = writable(false);
+export const puterUser: Writable<{ username: string; email?: string } | null> = writable(null);
+

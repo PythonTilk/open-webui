@@ -1,0 +1,22 @@
+# Build stage for frontend with Puter.js integration
+FROM node:22-alpine3.20 AS build
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json package-lock.json ./
+
+# Install dependencies with legacy peer deps
+RUN npm ci --legacy-peer-deps
+
+# Copy source files
+COPY . .
+
+# Build frontend
+RUN npm run build
+
+# Use official open-webui as base and replace frontend
+FROM ghcr.io/open-webui/open-webui:main
+
+# Copy our custom-built frontend
+COPY --from=build /app/build /app/build

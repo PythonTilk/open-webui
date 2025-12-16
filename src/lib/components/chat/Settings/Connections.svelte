@@ -13,6 +13,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Plus from '$lib/components/icons/Plus.svelte';
 	import Connection from './Connections/Connection.svelte';
+	import PuterConnection from '$lib/components/admin/Settings/Connections/PuterConnection.svelte';
 
 	import AddConnectionModal from '$lib/components/AddConnectionModal.svelte';
 
@@ -79,6 +80,11 @@
 	<div class=" overflow-y-scroll scrollbar-hidden h-full">
 		{#if config !== null}
 			<div class="">
+				<!-- Puter.js Connection -->
+				<PuterConnection />
+
+				<hr class="border-gray-100 dark:border-gray-850 my-3" />
+
 				<div class="pr-1.5">
 					<div class="">
 						<div class="flex justify-between items-center mb-0.5">

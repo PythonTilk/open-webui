@@ -8,8 +8,9 @@
 	import { getOpenAIConfig, updateOpenAIConfig, getOpenAIModels } from '$lib/apis/openai';
 	import { getModels as _getModels, getBackendConfig } from '$lib/apis';
 	import { getConnectionsConfig, setConnectionsConfig } from '$lib/apis/configs';
+	import * as PuterAPI from '$lib/apis/puter';
 
-	import { config, models, settings, user } from '$lib/stores';
+	import { config, models, settings, user, puterEnabled } from '$lib/stores';
 
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -19,17 +20,39 @@
 	import OpenAIConnection from './Connections/OpenAIConnection.svelte';
 	import AddConnectionModal from '$lib/components/AddConnectionModal.svelte';
 	import OllamaConnection from './Connections/OllamaConnection.svelte';
+	import PuterConnection from './Connections/PuterConnection.svelte';
 
 	const i18n = getContext('i18n');
 
 	const getModels = async () => {
-		const models = await _getModels(
+		let allModels = await _getModels(
 			localStorage.token,
 			$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null),
 			false,
 			true
 		);
-		return models;
+		
+		// Add Puter models if enabled
+		if ($puterEnabled && PuterAPI.isPuterAvailable()) {
+			try {
+				const customModels = $settings?.puterCustomModels ?? [];
+				const puterModels = PuterAPI.getModelsWithCustom(customModels);
+				if (Array.isArray(puterModels) && puterModels.length > 0) {
+					const formattedPuterModels = puterModels.map((m) => ({
+						id: `puter/${m.id || m.name || 'unknown'}`,
+						name: `Puter: ${m.name || m.id || 'Unknown Model'}`,
+						owned_by: 'puter',
+						external: true,
+						puter: true
+					}));
+					allModels = [...allModels, ...formattedPuterModels];
+				}
+			} catch (error) {
+				console.error('Failed to load Puter models:', error);
+			}
+		}
+		
+		return allModels;
 	};
 
 	// External
@@ -360,6 +383,8 @@
 						</div>
 					{/if}
 				</div>
+
+				<PuterConnection />
 
 				<div class="my-2">
 					<div class="flex justify-between items-center text-sm">

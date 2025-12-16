@@ -13,6 +13,8 @@
 	import { getTools } from '$lib/apis/tools';
 	import { getBanners } from '$lib/apis/configs';
 	import { getUserSettings } from '$lib/apis/users';
+	import * as PuterAPI from '$lib/apis/puter';
+	import { puterEnabled, puterSignedIn, puterUser } from '$lib/stores';
 
 	import { WEBUI_VERSION } from '$lib/constants';
 	import { compareVersion } from '$lib/utils';
@@ -99,6 +101,11 @@
 
 		if (userSettings?.ui) {
 			settings.set(userSettings.ui);
+			
+			// Sync puterEnabled store with saved settings
+			if (userSettings.ui.puterEnabled !== undefined) {
+				puterEnabled.set(userSettings.ui.puterEnabled);
+			}
 		}
 
 		if (cb) {
@@ -107,12 +114,41 @@
 	};
 
 	const setModels = async () => {
-		models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections ? ($settings?.directConnections ?? null) : null
-			)
+		let allModels = await getModels(
+			localStorage.token,
+			$config?.features?.enable_direct_connections ? ($settings?.directConnections ?? null) : null
 		);
+
+		// Add Puter models if enabled (sign-in will happen when user tries to use them)
+		if ($puterEnabled && PuterAPI.isPuterAvailable()) {
+			try {
+				// Update auth state if already signed in
+				if (PuterAPI.isSignedIn()) {
+					puterSignedIn.set(true);
+					const user = await PuterAPI.getUser();
+					if (user) {
+						puterUser.set({ username: user.username, email: user.email });
+					}
+				}
+
+				const customModels = $settings?.puterCustomModels ?? [];
+				const puterModels = PuterAPI.getModelsWithCustom(customModels);
+				if (Array.isArray(puterModels) && puterModels.length > 0) {
+					const formattedPuterModels = puterModels.map((m) => ({
+						id: `puter/${m.id || m.name || 'unknown'}`,
+						name: `Puter: ${m.name || m.id || 'Unknown Model'}`,
+						owned_by: 'puter',
+						external: true,
+						puter: true
+					}));
+					allModels = [...allModels, ...formattedPuterModels];
+				}
+			} catch (error) {
+				console.error('Failed to load Puter models:', error);
+			}
+		}
+
+		models.set(allModels);
 	};
 
 	const setToolServers = async () => {

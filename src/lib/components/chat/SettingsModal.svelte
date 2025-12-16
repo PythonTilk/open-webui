@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { getContext, onMount, tick } from 'svelte';
 	import { toast } from 'svelte-sonner';
-	import { config, models, settings, user } from '$lib/stores';
+	import { config, models, settings, user, puterEnabled } from '$lib/stores';
 	import { updateUserSettings } from '$lib/apis/users';
 	import { getModels as _getModels } from '$lib/apis';
+	import * as PuterAPI from '$lib/apis/puter';
 	import { goto } from '$app/navigation';
 
 	import Modal from '../common/Modal.svelte';
@@ -59,11 +60,17 @@
 				'default parameters',
 				'defaultsettings',
 				'default settings',
+				'free ai',
+				'free ai models',
+				'free models',
 				'general',
 				'keepalive',
 				'keep alive',
 				'languages',
 				'notifications',
+				'puter',
+				'puter.js',
+				'puterjs',
 				'requestmode',
 				'request mode',
 				'systemparameters',
@@ -525,10 +532,32 @@
 	};
 
 	const getModels = async () => {
-		return await _getModels(
+		let allModels = await _getModels(
 			localStorage.token,
 			$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
 		);
+		
+		// Add Puter models if enabled
+		if ($puterEnabled && PuterAPI.isPuterAvailable()) {
+			try {
+				const customModels = $settings?.puterCustomModels ?? [];
+				const puterModels = PuterAPI.getModelsWithCustom(customModels);
+				if (Array.isArray(puterModels) && puterModels.length > 0) {
+					const formattedPuterModels = puterModels.map((m) => ({
+						id: `puter/${m.id || m.name || 'unknown'}`,
+						name: `Puter: ${m.name || m.id || 'Unknown Model'}`,
+						owned_by: 'puter',
+						external: true,
+						puter: true
+					}));
+					allModels = [...allModels, ...formattedPuterModels];
+				}
+			} catch (error) {
+				console.error('Failed to load Puter models:', error);
+			}
+		}
+		
+		return allModels;
 	};
 
 	let selectedTab = 'general';
